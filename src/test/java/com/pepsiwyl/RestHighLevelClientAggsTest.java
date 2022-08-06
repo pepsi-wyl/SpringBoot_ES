@@ -1,26 +1,25 @@
 package com.pepsiwyl;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.pepsiwyl.pojo.Product;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import org.elasticsearch.action.index.*;
-import org.elasticsearch.action.search.*;
+import org.elasticsearch.action.search.SearchRequest;
+import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.client.RequestOptions;
 import org.elasticsearch.client.RestHighLevelClient;
-import org.elasticsearch.common.text.Text;
+
 import org.elasticsearch.index.query.QueryBuilders;
+import org.elasticsearch.search.aggregations.AggregationBuilder;
+import org.elasticsearch.search.aggregations.AggregationBuilders;
+import org.elasticsearch.search.aggregations.bucket.terms.ParsedDoubleTerms;
+import org.elasticsearch.search.aggregations.bucket.terms.ParsedStringTerms;
+import org.elasticsearch.search.aggregations.metrics.ParsedAvg;
+import org.elasticsearch.search.aggregations.metrics.ParsedMax;
+import org.elasticsearch.search.aggregations.metrics.ParsedMin;
+import org.elasticsearch.search.aggregations.metrics.ParsedSum;
 import org.elasticsearch.search.builder.SearchSourceBuilder;
-import org.elasticsearch.search.fetch.subphase.highlight.HighlightBuilder;
-import org.elasticsearch.search.sort.SortOrder;
-import org.elasticsearch.xcontent.XContentType;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Date;
 
 /**
  * @author by pepsi-wyl
@@ -28,75 +27,146 @@ import java.util.Date;
  */
 
 @Slf4j
-public class RestHighLevelClientObjectTest extends SpringBootEsApplicationTests {
+public class RestHighLevelClientAggsTest extends SpringBootEsApplicationTests {
 
     private final RestHighLevelClient restHighLevelClient;
 
     @Autowired
-    public RestHighLevelClientObjectTest(RestHighLevelClient restHighLevelClient) {
+    public RestHighLevelClientAggsTest(RestHighLevelClient restHighLevelClient) {
         this.restHighLevelClient = restHighLevelClient;
     }
 
+    // 分组查询
     @Test
     @SneakyThrows
-    public void addObject() {
-
-        // 准备对象
-        Product product = new Product().setId(3).setTitle("小浣干吃面").setPrice(1.5).setDescription("小浣熊干吃面真好吃").setCreateTime(new Date());
-
-        // 索引请求对象 索引名称
-        IndexRequest indexRequest = new IndexRequest("products");
-        // 添加文档的数据     id 手动指定文档的ID   source 指定文档的数据
-        indexRequest.id(product.getId().toString()).source(new ObjectMapper().writeValueAsString(product), XContentType.JSON);
-
-        // 添加文档       索引请求对象   请求配置对象(默认)
-        IndexResponse save = restHighLevelClient.index(indexRequest, RequestOptions.DEFAULT);
-        log.info(save.toString());
-
-        // 关闭资源
-        restHighLevelClient.close();
-    }
-
-    @Test
-    @SneakyThrows
-    public void getObject() {
+    public void testAggsGroup1() {
 
         // 搜索请求对象
-        SearchRequest searchRequest = new SearchRequest("products");
-        // 指定查询条件
+        SearchRequest searchRequest = new SearchRequest("fruit");
+        // 查询条件
         searchRequest.source(new SearchSourceBuilder()
-                .query(QueryBuilders.termQuery("description", "小浣熊"))
-                .from(0).size(2)
-                .sort("price", SortOrder.ASC)
-                .highlighter(new HighlightBuilder().field("description").preTags("<span style='color:red;'>").postTags("</span>"))
-        );
-
-        // 查询文档         查询请求对象   请求配置对象(默认)
+                .query(QueryBuilders.matchAllQuery()).size(0)
+                .aggregation(AggregationBuilders.terms("price_group").field("price")));
+        // 查询文档
         SearchResponse search = restHighLevelClient.search(searchRequest, RequestOptions.DEFAULT);
 
         // 处理数据
-        ArrayList<Product> productArrayList = new ArrayList<>();
-        Arrays.asList(search.getHits().getHits()).forEach((v) -> {
-            try {
+        ParsedDoubleTerms parsedDoubleTerms = search.getAggregations().get("price_group");
+        parsedDoubleTerms.getBuckets().forEach((entry -> {
+            log.info("key: " + entry.getKey() + "   " + "value:" + entry.getDocCount());
+        }));
 
-                // JSON To Object
-                Product product = new ObjectMapper().readValue(v.getSourceAsString(), Product.class);
-
-                // 处理高亮
-                if (v.getHighlightFields().containsKey("description")) {
-                    Text description = v.getHighlightFields().get("description").fragments()[0];
-                    product.setDescription(String.valueOf(description));
-                }
-
-                productArrayList.add(product);
-            } catch (JsonProcessingException e) {
-                throw new RuntimeException(e);
-            }
-        });
-        productArrayList.forEach(v -> log.info(v.toString()));
-
-        // 关闭资源
+        //关闭资源
         restHighLevelClient.close();
     }
+
+    // 分组查询
+    @Test
+    @SneakyThrows
+    public void testAggsGroup2() {
+
+        // 搜索请求对象
+        SearchRequest searchRequest = new SearchRequest("fruit");
+        // 查询条件
+        searchRequest.source(new SearchSourceBuilder()
+                .query(QueryBuilders.matchAllQuery()).size(0)
+                .aggregation(AggregationBuilders.terms("title_group").field("title")));
+        // 查询文档
+        SearchResponse search = restHighLevelClient.search(searchRequest, RequestOptions.DEFAULT);
+
+        // 处理数据
+        ParsedStringTerms parsedStringTerms = search.getAggregations().get("title_group");
+        parsedStringTerms.getBuckets().forEach((entry -> {
+            log.info("key: " + entry.getKey() + "   " + "value:" + entry.getDocCount());
+        }));
+
+        //关闭资源
+        restHighLevelClient.close();
+    }
+
+    // 求最大值
+    @Test
+    @SneakyThrows
+    public void testAggsMax() {
+
+        // 搜索请求对象
+        SearchRequest searchRequest = new SearchRequest("fruit");
+        // 查询条件
+        searchRequest.source(new SearchSourceBuilder()
+                .aggregation(AggregationBuilders.max("price_max").field("price")));
+        // 查询文档
+        SearchResponse search = restHighLevelClient.search(searchRequest, RequestOptions.DEFAULT);
+
+        // 处理数据
+        ParsedMax parsedMax = search.getAggregations().get("price_max");
+        log.info(parsedMax.getValueAsString());
+
+        //关闭资源
+        restHighLevelClient.close();
+    }
+
+    // 求最小值
+    @Test
+    @SneakyThrows
+    public void testAggsMin() {
+
+        // 搜索请求对象
+        SearchRequest searchRequest = new SearchRequest("fruit");
+        // 查询条件
+        searchRequest.source(new SearchSourceBuilder()
+                .aggregation(AggregationBuilders.min("price_min").field("price")));
+        // 查询文档
+        SearchResponse search = restHighLevelClient.search(searchRequest, RequestOptions.DEFAULT);
+
+        // 处理数据
+        ParsedMin parsedMin = search.getAggregations().get("price_min");
+        log.info(parsedMin.getValueAsString());
+
+        //关闭资源
+        restHighLevelClient.close();
+    }
+
+    // 求平均值
+    @Test
+    @SneakyThrows
+    public void testAggsAvg() {
+
+        // 搜索请求对象
+        SearchRequest searchRequest = new SearchRequest("fruit");
+        // 查询条件
+        searchRequest.source(new SearchSourceBuilder()
+                .aggregation(AggregationBuilders.avg("price_avg").field("price")));
+        // 查询文档
+        SearchResponse search = restHighLevelClient.search(searchRequest, RequestOptions.DEFAULT);
+
+        // 处理数据
+        ParsedAvg parsedAvg = search.getAggregations().get("price_avg");
+        log.info(parsedAvg.getValueAsString());
+
+        //关闭资源
+        restHighLevelClient.close();
+    }
+
+    // 求和
+    @Test
+    @SneakyThrows
+    public void testAggsSum() {
+
+        // 搜索请求对象
+        SearchRequest searchRequest = new SearchRequest("fruit");
+        // 查询条件
+        searchRequest.source(new SearchSourceBuilder()
+                .aggregation(AggregationBuilders.sum("price_sum").field("price")));
+        // 查询文档
+        SearchResponse search = restHighLevelClient.search(searchRequest, RequestOptions.DEFAULT);
+
+        // 处理数据
+        ParsedSum parsedSum = search.getAggregations().get("price_sum");
+        log.info(parsedSum.getValueAsString());
+
+        //关闭资源
+        restHighLevelClient.close();
+    }
+
 
 }
